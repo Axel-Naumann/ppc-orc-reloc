@@ -1,4 +1,3 @@
-//#include "/Users/axel/build/llvm/src/lib/ExecutionEngine/Orc/OrcMCJITReplacement.h"
 #include "llvm/ExecutionEngine/ExecutionEngine.h"
 #include "llvm/ExecutionEngine/OrcMCJITReplacement.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
@@ -6,21 +5,24 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/TargetSelect.h"
 
 using namespace llvm;
 
-int main(int argc, const char* argv[]) {
-  //std::shared_ptr<MCJITMemoryManager> MemMgr{new SectionMemoryManager};
-  //std::shared_ptr<RuntimeDyld::SymbolResolver> ClientResolver;
-  //std::unique_ptr<TargetMachine> TM;
-  //TM.reset(EngineBuilder().selectTarget());
-  //orc::OrcMCJITReplacement Exe{MemMgr, ClientResolver, std::move(TM)};
-  EngineBuilder Builder;
+std::unique_ptr<ExecutionEngine> createJIT(std::unique_ptr<Module> M) {
+  EngineBuilder Builder(std::move(M));
   Builder.setUseOrcMCJITReplacement(true);
   std::unique_ptr<RTDyldMemoryManager> MemMgr{new SectionMemoryManager};
   Builder.setMCJITMemoryManager(std::move(MemMgr));
-  std::unique_ptr<ExecutionEngine> Exe{ Builder.create() };
+  return std::unique_ptr<ExecutionEngine>(Builder.create());
+}
 
+int main(int argc, const char* argv[]) {
+  InitializeNativeTarget();
+  InitializeNativeTargetAsmPrinter();
+  InitializeNativeTargetAsmParser();
+
+  std::unique_ptr<ExecutionEngine> Exe;
   SMDiagnostic Diag;
   Function* FunMain = 0;
   for (int i = 1; i < argc; ++i) {
@@ -31,8 +33,14 @@ int main(int argc, const char* argv[]) {
     }
     if (!FunMain)
       FunMain = M->getFunction("main");
-    Exe->addModule(std::move(M));
+    if (!Exe)
+      Exe = std::move(createJIT(std::move(M)));
+    else
+      Exe->addModule(std::move(M));
   }
+  if (!Exe)
+    return 0;
+
   Exe->runStaticConstructorsDestructors(/*isDtors*/ false);
   if (!FunMain) {
     llvm::errs() << "No main()\n";
